@@ -18,11 +18,8 @@ RUN npm ci --omit=dev && npm cache clean --force
 COPY server.js ./
 COPY public ./public
 
-# Создаем папку для базы данных SQLite и настраиваем права для пользователя node
-RUN mkdir -p /app/data && chown -R node:node /app
-
-# Переключаемся на непривилегированного пользователя для безопасности
-USER node
+# Создаем папку для базы данных SQLite
+RUN mkdir -p /app/data
 
 # Открываем порт сервиса
 EXPOSE 7418
