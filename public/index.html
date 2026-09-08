@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cookie Talk — Быстрый веб-чат с комнатами</title>
+  <meta name="description" content="Уютный браузерный чат с комнатами по постоянным ссылкам, защитой создателя и историей сообщений.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div id="app" class="app-container">
+    <!-- Шапка приложения -->
+    <header class="navbar">
+      <div class="brand" id="brand-logo">
+        <span class="brand-icon">🍪</span>
+        <div class="brand-text">
+          <span class="brand-title">Cookie Talk</span>
+          <span class="brand-subtitle">приватные веб-комнаты</span>
+        </div>
+      </div>
+      <div class="nav-controls">
+        <button id="sound-toggle-btn" class="icon-btn" title="Вкл/Выкл звук">
+          <span id="sound-icon">🔔</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Главный экран (Создание комнаты и сохраненные комнаты) -->
+    <main id="home-view" class="view active">
+      <div class="hero-section">
+        <div class="badge-pill">✨ Стабильные комнаты и мгновенный доступ</div>
+        <h1 class="hero-title">Общайтесь без регистрации по прямой ссылке</h1>
+        <p class="hero-desc">
+          Создайте комнату, отправьте ссылку собеседнику и начинайте диалог. 
+          Комнаты сохраняются в вашем браузере и доступны в любой момент!
+        </p>
+      </div>
+
+      <div class="home-grid">
+        <!-- Блок создания комнаты и профиля -->
+        <section class="card primary-card">
+          <h2 class="card-title">Создать новую комнату</h2>
+          
+          <div class="form-group">
+            <label for="user-nickname-input">Ваше имя в чате</label>
+            <div class="input-with-action">
+              <input type="text" id="user-nickname-input" placeholder="Например: Иван или Алекс" maxlength="32">
+              <button id="random-name-btn" class="subtle-btn" type="button" title="Случайный псевдоним">🎲</button>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="room-title-input">Название комнаты (необязательно)</label>
+            <input type="text" id="room-title-input" placeholder="Например: Обсуждение проекта или Чайный клуб" maxlength="60">
+          </div>
+
+          <button id="create-room-btn" class="btn btn-primary btn-block">
+            <span>Создать комнату</span>
+            <span class="btn-arrow">→</span>
+          </button>
+        </section>
+
+        <!-- Блок сохраненных комнат (localStorage) -->
+        <section class="card saved-rooms-card">
+          <div class="card-header-flex">
+            <h2 class="card-title">Мои комнаты <span id="saved-rooms-count" class="counter-badge">0</span></h2>
+            <span class="storage-hint" title="Сохранены в вашем браузере">💾 локально</span>
+          </div>
+          
+          <div id="saved-rooms-list" class="saved-rooms-list">
+            <!-- Список комнат генерируется динамически через JS -->
+          </div>
+
+          <div id="no-saved-rooms" class="empty-state">
+            <div class="empty-icon">📭</div>
+            <p class="empty-text">У вас пока нет сохраненных комнат</p>
+            <span class="empty-subtext">Создайте новую или откройте ссылку-приглашение</span>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <!-- Экран чата комнаты -->
+    <main id="chat-view" class="view">
+      <div class="chat-wrapper">
+        <!-- Хедер комнаты -->
+        <div class="chat-header">
+          <div class="chat-header-left">
+            <button id="leave-room-btn" class="icon-btn back-btn" title="Вернуться к списку комнат">
+              <span>←</span>
+            </button>
+            <div class="room-info">
+              <div class="room-title-row">
+                <h2 id="current-room-name" class="room-name">Комната</h2>
+                <span id="role-badge" class="badge-role">Участник</span>
+              </div>
+              <div class="room-meta">
+                <span id="room-id-tag" class="room-id-tag">id: loading...</span>
+                <span class="dot-separator">•</span>
+                <span id="users-online-indicator" class="users-online">
+                  <span class="status-pulse"></span>
+                  <span id="users-count-text">1 онлайн</span>
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div class="chat-header-actions">
+            <button id="copy-link-btn" class="btn btn-secondary btn-sm" title="Скопировать ссылку для приглашения">
+              <span class="btn-icon">🔗</span>
+              <span class="btn-text">Скопировать ссылку</span>
+            </button>
+            <button id="delete-room-btn" class="btn btn-danger btn-sm hidden" title="Удалить комнату навсегда (только для создателя)">
+              <span class="btn-icon">🗑️</span>
+              <span class="btn-text">Удалить чат</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Окно сообщений -->
+        <div id="messages-container" class="messages-container">
+          <!-- Сообщения будут рендериться динамически -->
+        </div>
+
+        <!-- Индикатор набора текста -->
+        <div id="typing-indicator" class="typing-indicator hidden">
+          <div class="typing-dots">
+            <span></span><span></span><span></span>
+          </div>
+          <span id="typing-text" class="typing-text">Собеседник печатает...</span>
+        </div>
+
+        <!-- Панель ввода сообщения -->
+        <footer class="chat-input-area">
+          <form id="message-form" class="message-form">
+            <input 
+              type="text" 
+              id="message-input" 
+              placeholder="Напишите сообщение... (Enter для отправки)" 
+              autocomplete="off" 
+              maxlength="1000"
+            />
+            <button type="submit" id="send-message-btn" class="btn btn-primary btn-send" title="Отправить сообщение">
+              <span>Отправить</span>
+              <span class="send-icon">➤</span>
+            </button>
+          </form>
+        </footer>
+      </div>
+    </main>
+
+    <!-- Модальное окно: запрос никнейма при входе по прямой ссылке -->
+    <div id="name-modal" class="modal-overlay hidden">
+      <div class="modal-card">
+        <div class="modal-icon">👋</div>
+        <h3 class="modal-title">Добро пожаловать в комнату!</h3>
+        <p class="modal-desc" id="modal-room-desc">Пожалуйста, представьтесь, чтобы собеседник знал, с кем общается:</p>
+        
+        <form id="modal-name-form">
+          <div class="form-group">
+            <input type="text" id="modal-name-input" placeholder="Ваше имя..." maxlength="32" required autofocus>
+          </div>
+          <button type="submit" class="btn btn-primary btn-block">Войти в чат</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Модальное окно: подтверждение удаления комнаты создателем -->
+    <div id="delete-modal" class="modal-overlay hidden">
+      <div class="modal-card modal-danger">
+        <div class="modal-icon">⚠️</div>
+        <h3 class="modal-title">Удалить эту комнату навсегда?</h3>
+        <p class="modal-desc">
+          Вся история сообщений будет безвозвратно удалена из базы данных, а все подключенные собеседники покинут чат.
+        </p>
+        <div class="modal-actions">
+          <button id="cancel-delete-btn" class="btn btn-secondary">Отмена</button>
+          <button id="confirm-delete-btn" class="btn btn-danger">Да, удалить комнату</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Всплывающий Тост-уведомление -->
+    <div id="toast" class="toast hidden">
+      <span id="toast-icon">✨</span>
+      <span id="toast-message">Уведомление</span>
+    </div>
+  </div>
+
+  <!-- Socket.io клиент (предоставляется сервером) -->
+  <script src="/socket.io/socket.io.js"></script>
+  <!-- Клиентские модули -->
+  <script src="/js/storage.js"></script>
+  <script src="/js/audio.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>
