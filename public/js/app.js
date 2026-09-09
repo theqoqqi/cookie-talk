@@ -96,6 +96,7 @@ const dom = {
   typingText: document.getElementById('typing-text'),
   messageForm: document.getElementById('message-form'),
   messageInput: document.getElementById('message-input'),
+  sendMessageBtn: document.getElementById('send-message-btn'),
 
   // Modals & Toast
   nameModal: document.getElementById('name-modal'),
@@ -452,10 +453,29 @@ dom.messageForm.addEventListener('submit', (e) => {
   socket.emit('send-message', { text });
   dom.messageInput.value = '';
 
+  // Сохраняем фокус на поле ввода (чтобы клавиатура не закрывалась и можно было сразу писать дальше)
+  dom.messageInput.focus();
+
   // Сбрасываем статус "печатает"
   if (state.typingTimeout) clearTimeout(state.typingTimeout);
   socket.emit('typing', { isTyping: false });
 });
+
+// Предотвращаем потерю фокуса при нажатии на кнопку отправки (на мобильных сохраняет экранную клавиатуру)
+if (dom.sendMessageBtn) {
+  dom.sendMessageBtn.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+  });
+
+  dom.sendMessageBtn.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    if (typeof dom.messageForm.requestSubmit === 'function') {
+      dom.messageForm.requestSubmit();
+    } else {
+      dom.messageForm.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+    }
+  }, { passive: false });
+}
 
 // Индикатор набора текста
 dom.messageInput.addEventListener('input', () => {
@@ -562,17 +582,30 @@ function scrollToBottom() {
   dom.messagesContainer.scrollTop = dom.messagesContainer.scrollHeight;
 }
 
-// Автоматическая подстройка прокрутки при открытии экранной клавиатуры на смартфонах
-if (window.visualViewport) {
-  window.visualViewport.addEventListener('resize', () => {
-    if (state.currentRoomId) {
-      scrollToBottom();
-    }
-  });
+// Автоматическая подстройка высоты экрана и прокрутки (iOS Safari / Android Chrome / Экранная клавиатура)
+function updateViewportHeight() {
+  const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+  document.documentElement.style.setProperty('--app-height', `${vh}px`);
+  if (state.currentRoomId) {
+    scrollToBottom();
+  }
 }
 
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', updateViewportHeight);
+  window.visualViewport.addEventListener('scroll', updateViewportHeight);
+}
+window.addEventListener('resize', updateViewportHeight);
+window.addEventListener('orientationchange', () => {
+  setTimeout(updateViewportHeight, 150);
+});
+
+// Прокрутка при фокусе на поле ввода на мобилках
 dom.messageInput.addEventListener('focus', () => {
-  setTimeout(scrollToBottom, 250);
+  setTimeout(() => {
+    updateViewportHeight();
+    scrollToBottom();
+  }, 250);
 });
 
 function escapeHtml(str) {
@@ -610,32 +643,6 @@ function handleRoute() {
     showView('home');
   }
 }
-
-// Адаптивная поддержка точной высоты экрана (iOS Safari / Android Chrome / Клавиатура)
-function updateViewportHeight() {
-  const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
-  document.documentElement.style.setProperty('--app-height', `${vh}px`);
-  if (state.currentRoomId) {
-    scrollToBottom();
-  }
-}
-
-if (window.visualViewport) {
-  window.visualViewport.addEventListener('resize', updateViewportHeight);
-  window.visualViewport.addEventListener('scroll', updateViewportHeight);
-}
-window.addEventListener('resize', updateViewportHeight);
-window.addEventListener('orientationchange', () => {
-  setTimeout(updateViewportHeight, 150);
-});
-
-// Прокрутка при фокусе на поле ввода на мобилках
-dom.messageInput.addEventListener('focus', () => {
-  setTimeout(() => {
-    updateViewportHeight();
-    scrollToBottom();
-  }, 250);
-});
 
 // Инициализация при запуске
 function initApp() {
