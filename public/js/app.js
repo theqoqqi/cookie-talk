@@ -153,11 +153,15 @@ function showView(viewName) {
   if (viewName === 'home') {
     dom.homeView.classList.add('active');
     dom.chatView.classList.remove('active');
+    document.body.classList.remove('chat-open');
     state.currentRoomId = null;
     renderSavedRooms();
   } else if (viewName === 'chat') {
     dom.homeView.classList.remove('active');
     dom.chatView.classList.add('active');
+    document.body.classList.add('chat-open');
+    updateViewportHeight();
+    setTimeout(scrollToBottom, 60);
   }
 }
 
@@ -607,8 +611,35 @@ function handleRoute() {
   }
 }
 
+// Адаптивная поддержка точной высоты экрана (iOS Safari / Android Chrome / Клавиатура)
+function updateViewportHeight() {
+  const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+  document.documentElement.style.setProperty('--app-height', `${vh}px`);
+  if (state.currentRoomId) {
+    scrollToBottom();
+  }
+}
+
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', updateViewportHeight);
+  window.visualViewport.addEventListener('scroll', updateViewportHeight);
+}
+window.addEventListener('resize', updateViewportHeight);
+window.addEventListener('orientationchange', () => {
+  setTimeout(updateViewportHeight, 150);
+});
+
+// Прокрутка при фокусе на поле ввода на мобилках
+dom.messageInput.addEventListener('focus', () => {
+  setTimeout(() => {
+    updateViewportHeight();
+    scrollToBottom();
+  }, 250);
+});
+
 // Инициализация при запуске
 function initApp() {
+  updateViewportHeight();
   // Заполняем сохраненное имя пользователя
   if (state.username) {
     dom.userNicknameInput.value = state.username;
