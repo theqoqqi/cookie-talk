@@ -542,6 +542,19 @@ function scrollToBottom() {
   dom.messagesContainer.scrollTop = dom.messagesContainer.scrollHeight;
 }
 
+// Автоматическая подстройка прокрутки при открытии экранной клавиатуры на смартфонах
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', () => {
+    if (state.currentRoomId) {
+      scrollToBottom();
+    }
+  });
+}
+
+dom.messageInput.addEventListener('focus', () => {
+  setTimeout(scrollToBottom, 250);
+});
+
 function escapeHtml(str) {
   if (!str) return '';
   return str
