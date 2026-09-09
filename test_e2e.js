@@ -102,17 +102,92 @@ async function runTests() {
   client1.emit('typing', { isTyping: true });
   await typingPromise;
 
-  // 8. Удаление комнаты Создателем
+  // 8. Загрузка изображения через POST /api/upload
+  const uploadImage = (imgBase64) => new Promise((resolve, reject) => {
+    const postData = JSON.stringify({ roomId, imageBase64: imgBase64 });
+    const req = http.request({
+      hostname: 'localhost',
+      port: PORT,
+      path: '/api/upload',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(postData)
+      }
+    }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => resolve(JSON.parse(data)));
+    });
+    req.on('error', reject);
+    req.write(postData);
+    req.end();
+  });
+
+  // Тестовое 1x1 PNG изображение (data URL)
+  const sampleBase64 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+  const uploadRes = await uploadImage(sampleBase64);
+  if (!uploadRes.success || !uploadRes.url.startsWith(`/uploads/${roomId}/`)) {
+    throw new Error('Некорректный ответ от /api/upload: ' + JSON.stringify(uploadRes));
+  }
+  console.log('✔ 8. Изображение успешно загружено на сервер:', uploadRes.url);
+
+  // 9. Отправка сообщения с картинкой и текстом от Создателя
+  const imageMessagePromise = new Promise((resolve) => {
+    client2.on('new-message', (msg) => {
+      if (msg.imageUrl === uploadRes.url && msg.text === 'Посмотри на это фото!') {
+        console.log('✔ 9. Гость получил сообщение с прикрепленным фото и текстом');
+        resolve(msg);
+      }
+    });
+  });
+
+  client1.emit('send-message', { text: 'Посмотри на это фото!', imageUrl: uploadRes.url });
+  await imageMessagePromise;
+
+  // 10. Отправка сообщения только с картинкой (без текста)
+  const imageOnlyPromise = new Promise((resolve) => {
+    client1.on('new-message', (msg) => {
+      if (msg.imageUrl === uploadRes.url && !msg.text) {
+        console.log('✔ 10. Создатель получил сообщение с чистой картинкой (без текста)');
+        resolve(msg);
+      }
+    });
+  });
+
+  client2.emit('send-message', { text: '', imageUrl: uploadRes.url });
+  await imageOnlyPromise;
+
+  // 11. Проверка получения истории с картинками новым участником (Client 3)
+  const client3 = io(`http://localhost:${PORT}`);
+  await new Promise((resolve) => client3.on('connect', resolve));
+
+  const client3HistoryPromise = new Promise((resolve, reject) => {
+    client3.on('room-joined', (data) => {
+      const imgMsgs = data.history.filter(m => m.imageUrl);
+      if (imgMsgs.length >= 2) {
+        console.log('✔ 11. Новый участник успешно получил историю с сохраненными картинками (найдено:', imgMsgs.length, ')');
+        resolve(data);
+      } else {
+        reject(new Error('В истории не найдены сообщения с картинками'));
+      }
+    });
+  });
+
+  client3.emit('join-room', { roomId, username: 'Фото-Наблюдатель' });
+  await client3HistoryPromise;
+
+  // 12. Удаление комнаты Создателем
   const client2DeletedPromise = new Promise((resolve) => {
     client2.on('room-deleted', (data) => {
-      console.log('✔ 8. Гость получил событие удаления комнаты создателем');
+      console.log('✔ 12. Гость получил событие удаления комнаты создателем');
       resolve(data);
     });
   });
 
   const client1DeletedPromise = new Promise((resolve) => {
     client1.on('room-deleted', (data) => {
-      console.log('✔ 9. Создатель подтвердил удаление комнаты');
+      console.log('✔ 13. Создатель подтвердил удаление комнаты');
       resolve(data);
     });
   });
@@ -120,27 +195,28 @@ async function runTests() {
   client1.emit('delete-room', { roomId, creatorKey });
   await Promise.all([client2DeletedPromise, client1DeletedPromise]);
 
-  // 9. Попытка войти в удаленную комнату
-  const client3 = io(`http://localhost:${PORT}`);
-  await new Promise((resolve) => client3.on('connect', resolve));
+  // 13. Попытка войти в удаленную комнату
+  const client4 = io(`http://localhost:${PORT}`);
+  await new Promise((resolve) => client4.on('connect', resolve));
 
   const notFoundPromise = new Promise((resolve) => {
-    client3.on('room-not-found', (data) => {
-      console.log('✔ 10. Попытка входа в удаленную комнату вернула room-not-found');
+    client4.on('room-not-found', (data) => {
+      console.log('✔ 14. Попытка входа в удаленную комнату вернула room-not-found');
       resolve(data);
     });
   });
 
-  client3.emit('join-room', { roomId, username: 'Опоздавший' });
+  client4.emit('join-room', { roomId, username: 'Опоздавший' });
   await notFoundPromise;
 
   client1.disconnect();
   client2.disconnect();
   client3.disconnect();
+  client4.disconnect();
 
-  console.log('\n=============================================');
-  console.log('🎉 ВСЕ E2E ТЕСТЫ УСПЕШНО ПРОЙДЕНЫ НА 100%! 🎉');
-  console.log('=============================================');
+  console.log('\n======================================================');
+  console.log('🎉 ВСЕ E2E ТЕСТЫ (ВКЛЮЧАЯ КАРТИНКИ) УСПЕШНО ПРОЙДЕНЫ! 🎉');
+  console.log('======================================================');
 }
 
 runTests().catch(err => {

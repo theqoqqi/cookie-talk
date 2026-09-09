@@ -14,7 +14,8 @@ const state = {
   typingTimeout: null,
   activeTypers: new Set(),
   lastMessageSender: null,
-  lastMessageTime: null
+  lastMessageTime: null,
+  pendingImage: null
 };
 
 // Список милых псевдонимов для генератора
@@ -97,6 +98,21 @@ const dom = {
   messageForm: document.getElementById('message-form'),
   messageInput: document.getElementById('message-input'),
   sendMessageBtn: document.getElementById('send-message-btn'),
+  attachImageBtn: document.getElementById('attach-image-btn'),
+  imageFileInput: document.getElementById('image-file-input'),
+  imagePreviewBar: document.getElementById('image-preview-bar'),
+  imagePreviewImg: document.getElementById('image-preview-img'),
+  imagePreviewName: document.getElementById('image-preview-name'),
+  imagePreviewSize: document.getElementById('image-preview-size'),
+  cancelImageBtn: document.getElementById('cancel-image-btn'),
+  dropZoneOverlay: document.getElementById('drop-zone-overlay'),
+
+  // Lightbox
+  lightboxModal: document.getElementById('lightbox-modal'),
+  lightboxImg: document.getElementById('lightbox-img'),
+  lightboxCloseBtn: document.getElementById('lightbox-close-btn'),
+  lightboxBackdrop: document.getElementById('lightbox-backdrop'),
+  lightboxCaption: document.getElementById('lightbox-caption'),
 
   // Modals & Toast
   nameModal: document.getElementById('name-modal'),
@@ -156,6 +172,8 @@ function showView(viewName) {
     dom.chatView.classList.remove('active');
     document.body.classList.remove('chat-open');
     state.currentRoomId = null;
+    clearPendingImage();
+    closeLightbox();
     renderSavedRooms();
   } else if (viewName === 'chat') {
     dom.homeView.classList.remove('active');
@@ -444,14 +462,220 @@ socket.on('room-error', (data) => {
   showToast(data.message || 'Произошла ошибка', '⚠️');
 });
 
-// Отправка сообщения
-dom.messageForm.addEventListener('submit', (e) => {
+// Обработка и сжатие выбранного изображения через Canvas
+function processImageFile(file) {
+  if (!file || !file.type.startsWith('image/')) {
+    showToast('Пожалуйста, выберите файл изображения (JPG, PNG, WebP, GIF)', '⚠️');
+    return;
+  }
+
+  if (file.size > 15 * 1024 * 1024) {
+    showToast('Файл слишком большой (макс. 15 МБ)', '⚠️');
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const img = new Image();
+    img.onload = () => {
+      // Для GIF или уже оптимизированных картинок сохраняем оригинальный вид
+      if (file.type === 'image/gif' || (file.size < 400 * 1024 && img.width <= 1600 && img.height <= 1600)) {
+        setPendingImage(e.target.result, file.name, file.size);
+        return;
+      }
+
+      const MAX_DIM = 1600;
+      let w = img.width;
+      let h = img.height;
+
+      if (w > MAX_DIM || h > MAX_DIM) {
+        if (w > h) {
+          h = Math.round((h * MAX_DIM) / w);
+          w = MAX_DIM;
+        } else {
+          w = Math.round((w * MAX_DIM) / h);
+          h = MAX_DIM;
+        }
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, w, h);
+
+      const mime = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
+      const quality = 0.85;
+      const compressedDataUrl = canvas.toDataURL(mime, quality);
+
+      const approxSize = Math.round((compressedDataUrl.length * 3) / 4);
+      setPendingImage(compressedDataUrl, file.name, approxSize);
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function setPendingImage(dataUrl, name, size) {
+  state.pendingImage = { dataUrl, name, size };
+  dom.imagePreviewImg.src = dataUrl;
+  dom.imagePreviewName.textContent = name || 'изображение.jpg';
+  dom.imagePreviewSize.textContent = formatFileSize(size);
+  dom.imagePreviewBar.classList.remove('hidden');
+  dom.messageInput.focus();
+}
+
+function clearPendingImage() {
+  state.pendingImage = null;
+  dom.imageFileInput.value = '';
+  dom.imagePreviewImg.src = '';
+  dom.imagePreviewBar.classList.add('hidden');
+}
+
+function formatFileSize(bytes) {
+  if (!bytes) return '0 KB';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// Lightbox (Полноэкранный просмотр)
+function openLightbox(src, caption) {
+  dom.lightboxImg.src = src;
+  if (caption && caption.trim()) {
+    dom.lightboxCaption.textContent = caption.trim();
+    dom.lightboxCaption.classList.remove('hidden');
+  } else {
+    dom.lightboxCaption.classList.add('hidden');
+  }
+  dom.lightboxModal.classList.remove('hidden');
+}
+
+function closeLightbox() {
+  dom.lightboxModal.classList.add('hidden');
+  dom.lightboxImg.src = '';
+}
+
+dom.lightboxCloseBtn.addEventListener('click', closeLightbox);
+dom.lightboxBackdrop.addEventListener('click', closeLightbox);
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !dom.lightboxModal.classList.contains('hidden')) {
+    closeLightbox();
+  }
+});
+
+// События кнопки прикрепления и инпута файла
+dom.attachImageBtn.addEventListener('click', () => {
+  dom.imageFileInput.click();
+});
+
+dom.imageFileInput.addEventListener('change', (e) => {
+  if (e.target.files && e.target.files[0]) {
+    processImageFile(e.target.files[0]);
+  }
+});
+
+dom.cancelImageBtn.addEventListener('click', () => {
+  clearPendingImage();
+  dom.messageInput.focus();
+});
+
+// Вставка из буфера обмена (Ctrl+V / Paste)
+window.addEventListener('paste', (e) => {
+  if (!state.currentRoomId) return;
+  const items = (e.clipboardData || e.originalEvent?.clipboardData)?.items;
+  if (!items) return;
+
+  for (let i = 0; i < items.length; i++) {
+    if (items[i].type.indexOf('image') !== -1) {
+      const file = items[i].getAsFile();
+      if (file) {
+        e.preventDefault();
+        processImageFile(file);
+        showToast('Изображение прикреплено из буфера обмена 📋', '✨');
+        break;
+      }
+    }
+  }
+});
+
+// Drag and Drop изображений в окно чата
+const chatViewEl = dom.chatView;
+let dragCounter = 0;
+
+chatViewEl.addEventListener('dragenter', (e) => {
+  e.preventDefault();
+  if (!state.currentRoomId) return;
+  dragCounter++;
+  dom.dropZoneOverlay.classList.remove('hidden');
+});
+
+chatViewEl.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  if (!state.currentRoomId) return;
+});
+
+chatViewEl.addEventListener('dragleave', (e) => {
+  e.preventDefault();
+  dragCounter--;
+  if (dragCounter <= 0) {
+    dragCounter = 0;
+    dom.dropZoneOverlay.classList.add('hidden');
+  }
+});
+
+chatViewEl.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dragCounter = 0;
+  dom.dropZoneOverlay.classList.add('hidden');
+  if (!state.currentRoomId) return;
+
+  if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) {
+    processImageFile(e.dataTransfer.files[0]);
+  }
+});
+
+// Отправка сообщения (текст и/или изображение)
+dom.messageForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   const text = dom.messageInput.value.trim();
-  if (!text || !state.currentRoomId) return;
+  const hasImage = Boolean(state.pendingImage);
 
-  socket.emit('send-message', { text });
+  if ((!text && !hasImage) || !state.currentRoomId) return;
+
+  let imageUrl = null;
+
+  if (hasImage) {
+    dom.sendMessageBtn.disabled = true;
+    try {
+      const res = await fetch('/api/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          roomId: state.currentRoomId,
+          imageBase64: state.pendingImage.dataUrl
+        })
+      });
+      const data = await res.json();
+      if (!data.success) {
+        showToast(data.error || 'Ошибка при загрузке изображения', '⚠️');
+        dom.sendMessageBtn.disabled = false;
+        return;
+      }
+      imageUrl = data.url;
+    } catch (uploadErr) {
+      console.error('Ошибка загрузки фото:', uploadErr);
+      showToast('Сетевая ошибка при загрузке изображения', '⚠️');
+      dom.sendMessageBtn.disabled = false;
+      return;
+    } finally {
+      dom.sendMessageBtn.disabled = false;
+    }
+  }
+
+  socket.emit('send-message', { text, imageUrl });
   dom.messageInput.value = '';
+  clearPendingImage();
 
   // Сохраняем фокус на поле ввода (чтобы клавиатура не закрывалась и можно было сразу писать дальше)
   dom.messageInput.focus();
@@ -553,18 +777,48 @@ function appendMessage(msg) {
   const row = document.createElement('div');
   row.className = `message-row ${isSelf ? 'self' : ''} ${isConsecutive ? 'consecutive' : ''}`;
 
+  const hasImage = Boolean(msg.imageUrl);
+  const hasText = Boolean(msg.text && msg.text.trim());
+  const imageOnly = hasImage && !hasText;
+
+  let headerHtml = '';
+  if (!isConsecutive) {
+    headerHtml = `
+      <div class="message-header">
+        <span class="message-sender">${isSelf ? 'Вы' : escapeHtml(msg.username)}</span>
+        <span class="message-time">${formatTime(msg.createdAt)}</span>
+      </div>
+    `;
+  }
+
+  let bubbleHtml = '';
+  if (hasImage) {
+    bubbleHtml += `
+      <div class="message-image-wrap" title="Нажмите, чтобы увеличить">
+        <img src="${escapeHtml(msg.imageUrl)}" alt="Изображение" class="message-image" loading="lazy" />
+      </div>
+    `;
+  }
+  if (hasText) {
+    bubbleHtml += `<div class="message-text">${linkify(escapeHtml(msg.text))}</div>`;
+  }
+
   row.innerHTML = `
     <div class="message-avatar" style="background-color: ${avatarColor}">${initials}</div>
     <div class="message-content">
-      ${!isConsecutive ? `
-        <div class="message-header">
-          <span class="message-sender">${isSelf ? 'Вы' : escapeHtml(msg.username)}</span>
-          <span class="message-time">${formatTime(msg.createdAt)}</span>
-        </div>
-      ` : ''}
-      <div class="message-bubble">${linkify(escapeHtml(msg.text))}</div>
+      ${headerHtml}
+      <div class="message-bubble ${imageOnly ? 'has-image-only' : ''}">${bubbleHtml}</div>
     </div>
   `;
+
+  if (hasImage) {
+    const imgWrap = row.querySelector('.message-image-wrap');
+    if (imgWrap) {
+      imgWrap.addEventListener('click', () => {
+        openLightbox(msg.imageUrl, msg.text);
+      });
+    }
+  }
 
   dom.messagesContainer.appendChild(row);
 }

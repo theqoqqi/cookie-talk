@@ -16,8 +16,13 @@ const PORT = process.env.PORT || 7418;
 
 // Инициализация директории данных и базы данных SQLite
 const DATA_DIR = path.join(__dirname, 'data');
+const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
+
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+if (!fs.existsSync(UPLOADS_DIR)) {
+  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
 
 const db = new DatabaseSync(path.join(DATA_DIR, 'chat.db'));
@@ -38,6 +43,7 @@ db.exec(`
     room_id TEXT NOT NULL,
     username TEXT NOT NULL,
     text TEXT NOT NULL,
+    image_url TEXT,
     created_at INTEGER NOT NULL,
     FOREIGN KEY(room_id) REFERENCES rooms(id) ON DELETE CASCADE
   );
@@ -45,14 +51,21 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_messages_room ON messages(room_id, created_at);
 `);
 
+// Миграция для существующих БД: добавляем колонку image_url при необходимости
+try {
+  db.exec('ALTER TABLE messages ADD COLUMN image_url TEXT;');
+} catch (e) {
+  // Колонка уже существует
+}
+
 // Подготовка SQL-запросов
 const stmtGetRoom = db.prepare('SELECT id, name, created_at FROM rooms WHERE id = ?');
 const stmtGetRoomWithKey = db.prepare('SELECT * FROM rooms WHERE id = ?');
 const stmtCreateRoom = db.prepare('INSERT INTO rooms (id, name, creator_key, created_at) VALUES (?, ?, ?, ?)');
 const stmtDeleteRoom = db.prepare('DELETE FROM rooms WHERE id = ?');
 const stmtDeleteMessages = db.prepare('DELETE FROM messages WHERE id = ?');
-const stmtGetMessages = db.prepare('SELECT id, username, text, created_at FROM messages WHERE room_id = ? ORDER BY created_at ASC LIMIT 150');
-const stmtInsertMessage = db.prepare('INSERT INTO messages (room_id, username, text, created_at) VALUES (?, ?, ?, ?)');
+const stmtGetMessages = db.prepare('SELECT id, username, text, image_url, created_at FROM messages WHERE room_id = ? ORDER BY created_at ASC LIMIT 150');
+const stmtInsertMessage = db.prepare('INSERT INTO messages (room_id, username, text, image_url, created_at) VALUES (?, ?, ?, ?, ?)');
 
 // Генератор приятных ID комнат
 const ADJECTIVES = ['crispy', 'sweet', 'golden', 'cozy', 'warm', 'magic', 'choco', 'sugar', 'honey', 'glazed', 'caramel', 'vanilla'];
@@ -65,12 +78,60 @@ function generateRoomId() {
   return `${adj}-${noun}-${num}`;
 }
 
-app.use(express.json());
+app.use(express.json({ limit: '12mb' }));
+app.use('/uploads', express.static(UPLOADS_DIR));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Healthcheck эндпоинт для Docker и мониторинга
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', uptime: process.uptime() });
+});
+
+// API: Загрузка изображения в комнату
+app.post('/api/upload', (req, res) => {
+  try {
+    const { roomId, imageBase64 } = req.body || {};
+    if (!roomId || !imageBase64) {
+      return res.status(400).json({ success: false, error: 'Отсутствуют обязательные данные (roomId, imageBase64)' });
+    }
+
+    const room = stmtGetRoom.get(roomId);
+    if (!room) {
+      return res.status(404).json({ success: false, error: 'Комната не найдена' });
+    }
+
+    const matches = imageBase64.match(/^data:image\/([a-zA-Z0-9+]+);base64,(.+)$/);
+    if (!matches) {
+      return res.status(400).json({ success: false, error: 'Неверный формат изображения' });
+    }
+
+    let ext = matches[1].toLowerCase();
+    if (ext === 'jpeg') ext = 'jpg';
+    if (!['jpg', 'png', 'webp', 'gif'].includes(ext)) {
+      return res.status(400).json({ success: false, error: 'Неподдерживаемый формат (разрешены JPG, PNG, WebP, GIF)' });
+    }
+
+    const buffer = Buffer.from(matches[2], 'base64');
+    if (buffer.length > 8 * 1024 * 1024) {
+      return res.status(400).json({ success: false, error: 'Размер изображения превышает 8 МБ' });
+    }
+
+    const roomUploadDir = path.join(UPLOADS_DIR, roomId);
+    if (!fs.existsSync(roomUploadDir)) {
+      fs.mkdirSync(roomUploadDir, { recursive: true });
+    }
+
+    const filename = `${Date.now()}-${crypto.randomBytes(8).toString('hex')}.${ext}`;
+    const filePath = path.join(roomUploadDir, filename);
+
+    fs.writeFileSync(filePath, buffer);
+
+    const publicUrl = `/uploads/${roomId}/${filename}`;
+    res.json({ success: true, url: publicUrl });
+  } catch (err) {
+    console.error('Ошибка сохранения изображения:', err);
+    res.status(500).json({ success: false, error: 'Не удалось сохранить изображение' });
+  }
 });
 
 // API: Создать комнату
@@ -182,6 +243,7 @@ io.on('connection', (socket) => {
         id: msg.id,
         username: msg.username,
         text: msg.text,
+        imageUrl: msg.image_url || null,
         createdAt: msg.created_at
       }));
 
@@ -209,8 +271,8 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Отправка сообщения
-  socket.on('send-message', ({ text }) => {
+  // Отправка сообщения (текст и/или изображение)
+  socket.on('send-message', ({ text, imageUrl }) => {
     try {
       const roomId = socket.data.roomId;
       const username = socket.data.username;
@@ -220,7 +282,8 @@ io.on('connection', (socket) => {
       }
 
       const cleanText = (text || '').trim();
-      if (!cleanText) return;
+      const cleanImageUrl = (imageUrl || '').trim();
+      if (!cleanText && !cleanImageUrl) return;
 
       // Проверяем, существует ли комната еще в БД
       const room = stmtGetRoom.get(roomId);
@@ -229,12 +292,13 @@ io.on('connection', (socket) => {
       }
 
       const createdAt = Date.now();
-      const insertResult = stmtInsertMessage.run(roomId, username, cleanText, createdAt);
+      const insertResult = stmtInsertMessage.run(roomId, username, cleanText, cleanImageUrl || null, createdAt);
 
       const messagePayload = {
         id: insertResult.lastInsertRowid,
         username,
         text: cleanText,
+        imageUrl: cleanImageUrl || null,
         createdAt
       };
 
@@ -277,6 +341,16 @@ io.on('connection', (socket) => {
       // Удаляем сообщения и комнату
       stmtDeleteMessages.run(roomId);
       stmtDeleteRoom.run(roomId);
+
+      // Удаляем загруженные файлы комнаты
+      const roomUploadDir = path.join(UPLOADS_DIR, roomId);
+      if (fs.existsSync(roomUploadDir)) {
+        try {
+          fs.rmSync(roomUploadDir, { recursive: true, force: true });
+        } catch (e) {
+          console.error(`Ошибка удаления файлов комнаты ${roomId}:`, e);
+        }
+      }
 
       // Оповещаем всех подключенных участников
       io.to(roomId).emit('room-deleted', {

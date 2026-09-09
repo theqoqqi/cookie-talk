@@ -800,6 +800,42 @@ input[type="text"]::placeholder {
   color: #c7d2fe;
 }
 
+/* Изображение внутри сообщения */
+.message-image-wrap {
+  margin-bottom: 0.35rem;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  max-width: 320px;
+  position: relative;
+  cursor: zoom-in;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.message-image-wrap:only-child,
+.message-image-wrap:last-child {
+  margin-bottom: 0;
+}
+
+.message-image {
+  display: block;
+  width: 100%;
+  max-height: 320px;
+  object-fit: cover;
+  border-radius: 6px;
+  transition: transform 0.2s ease, filter 0.2s ease;
+}
+
+.message-image:hover {
+  filter: brightness(1.08);
+}
+
+.message-text {
+  word-break: break-word;
+  line-height: 1.42;
+}
+
 /* ==========================================================================
    Второе и последующие сообщения подряд от одного пользователя
    ========================================================================== */
@@ -898,6 +934,223 @@ input[type="text"]::placeholder {
 
 .send-icon {
   font-size: 0.85rem;
+}
+
+.btn-attach {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  cursor: pointer;
+  font-size: 1.05rem;
+  transition: var(--transition-smooth);
+}
+
+.btn-attach:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.2);
+  transform: translateY(-1px);
+}
+
+/* Image Preview Bar above input */
+.image-preview-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.35rem 0.65rem;
+  margin-bottom: 0.45rem;
+  background: rgba(30, 41, 59, 0.7);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  animation: fadeIn 0.15s ease-out;
+}
+
+.image-preview-container {
+  position: relative;
+  width: 42px;
+  height: 42px;
+  border-radius: 6px;
+  overflow: hidden;
+  flex-shrink: 0;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.image-preview-container img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.cancel-image-btn {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgba(239, 68, 68, 0.9);
+  color: #ffffff;
+  border: none;
+  font-size: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.12s ease;
+}
+
+.cancel-image-btn:hover {
+  transform: scale(1.15);
+  background: #dc2626;
+}
+
+.image-preview-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.image-preview-name {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.image-preview-size {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+}
+
+/* Drag & Drop Zone */
+.drop-zone-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.92);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed var(--accent-secondary);
+  border-radius: var(--radius-lg);
+  pointer-events: none;
+  animation: fadeIn 0.18s ease-out;
+}
+
+.drop-zone-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  text-align: center;
+  padding: 1.5rem;
+}
+
+.drop-icon {
+  font-size: 2.8rem;
+  animation: bounceSlow 1.5s infinite ease-in-out;
+}
+
+@keyframes bounceSlow {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+.drop-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.drop-subtitle {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+/* Lightbox Modal */
+.lightbox-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 2500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fadeIn 0.18s ease-out;
+}
+
+.lightbox-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.92);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.lightbox-content {
+  position: relative;
+  z-index: 10;
+  max-width: 92vw;
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.lightbox-img {
+  max-width: 90vw;
+  max-height: 82vh;
+  object-fit: contain;
+  border-radius: var(--radius-md);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.1);
+  user-select: none;
+}
+
+.lightbox-close-btn {
+  position: absolute;
+  top: -38px;
+  right: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+
+.lightbox-close-btn:hover {
+  background: rgba(255, 255, 255, 0.25);
+  transform: scale(1.08);
+}
+
+.lightbox-caption {
+  margin-top: 0.5rem;
+  color: #ffffff;
+  font-size: 0.88rem;
+  background: rgba(15, 23, 42, 0.8);
+  padding: 0.3rem 0.85rem;
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  max-width: 80vw;
+  text-align: center;
 }
 
 /* ==========================================================================
@@ -1198,6 +1451,16 @@ input[type="text"]::placeholder {
     font-size: 16px !important;
   }
 
+  .btn-attach {
+    width: 36px;
+    height: 36px;
+    font-size: 1rem;
+  }
+
+  .message-image-wrap {
+    max-width: 240px;
+  }
+
   .btn-send {
     width: 38px;
     height: 38px;
@@ -1262,6 +1525,16 @@ input[type="text"]::placeholder {
   .room-name {
     max-width: 110px;
     font-size: 0.82rem;
+  }
+
+  .btn-attach {
+    width: 32px;
+    height: 32px;
+    font-size: 0.9rem;
+  }
+
+  .message-image-wrap {
+    max-width: 200px;
   }
 
   .room-meta {

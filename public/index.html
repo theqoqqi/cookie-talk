@@ -123,6 +123,15 @@
           </div>
         </div>
 
+        <!-- Оверлей перетаскивания файлов (Drag & Drop) -->
+        <div id="drop-zone-overlay" class="drop-zone-overlay hidden">
+          <div class="drop-zone-content">
+            <span class="drop-icon">📷</span>
+            <span class="drop-title">Перетащите изображение сюда</span>
+            <span class="drop-subtitle">PNG, JPG, WebP или GIF до 8 МБ</span>
+          </div>
+        </div>
+
         <!-- Окно сообщений -->
         <div id="messages-container" class="messages-container">
           <!-- Сообщения будут рендериться динамически -->
@@ -138,7 +147,28 @@
 
         <!-- Панель ввода сообщения -->
         <footer class="chat-input-area">
+          <!-- Превью выбранного изображения перед отправкой -->
+          <div id="image-preview-bar" class="image-preview-bar hidden">
+            <div class="image-preview-container">
+              <img id="image-preview-img" src="" alt="Предпросмотр" />
+              <button type="button" id="cancel-image-btn" class="cancel-image-btn" title="Убрать фото">✕</button>
+            </div>
+            <div class="image-preview-meta">
+              <span id="image-preview-name" class="image-preview-name">фото.jpg</span>
+              <span id="image-preview-size" class="image-preview-size">0 KB</span>
+            </div>
+          </div>
+
           <form id="message-form" class="message-form">
+            <input 
+              type="file" 
+              id="image-file-input" 
+              accept="image/jpeg,image/png,image/webp,image/gif" 
+              class="hidden"
+            />
+            <button type="button" id="attach-image-btn" class="btn btn-attach" title="Прикрепить фото (или вставьте скриншот через Ctrl+V)">
+              <span class="attach-icon">📎</span>
+            </button>
             <input 
               type="text" 
               id="message-input" 
@@ -190,6 +220,16 @@
     <div id="toast" class="toast hidden">
       <span id="toast-icon">✨</span>
       <span id="toast-message">Уведомление</span>
+    </div>
+
+    <!-- Полноэкранный просмотрщик изображений (Lightbox) -->
+    <div id="lightbox-modal" class="lightbox-modal hidden" role="dialog" aria-modal="true">
+      <div id="lightbox-backdrop" class="lightbox-backdrop"></div>
+      <div class="lightbox-content">
+        <button id="lightbox-close-btn" class="lightbox-close-btn" title="Закрыть (Esc)">✕</button>
+        <img id="lightbox-img" class="lightbox-img" src="" alt="Увеличенное изображение" />
+        <div id="lightbox-caption" class="lightbox-caption hidden"></div>
+      </div>
     </div>
   </div>
 
