@@ -386,7 +386,13 @@ socket.on('room-joined', (data) => {
   appendSystemMessage(`Комната создана: ${createdDate}`);
 
   if (data.history && data.history.length > 0) {
-    data.history.forEach(msg => appendMessage(msg));
+    data.history.forEach(msg => {
+      try {
+        appendMessage(msg);
+      } catch (renderErr) {
+        console.error('Ошибка рендера сообщения из истории:', renderErr, msg);
+      }
+    });
   } else {
     appendSystemMessage('История сообщений пока пуста. Начните беседу первым!');
   }

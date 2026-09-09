@@ -63,8 +63,17 @@ const stmtGetRoom = db.prepare('SELECT id, name, created_at FROM rooms WHERE id 
 const stmtGetRoomWithKey = db.prepare('SELECT * FROM rooms WHERE id = ?');
 const stmtCreateRoom = db.prepare('INSERT INTO rooms (id, name, creator_key, created_at) VALUES (?, ?, ?, ?)');
 const stmtDeleteRoom = db.prepare('DELETE FROM rooms WHERE id = ?');
-const stmtDeleteMessages = db.prepare('DELETE FROM messages WHERE id = ?');
-const stmtGetMessages = db.prepare('SELECT id, username, text, image_url, created_at FROM messages WHERE room_id = ? ORDER BY created_at ASC LIMIT 150');
+const stmtDeleteMessages = db.prepare('DELETE FROM messages WHERE room_id = ?');
+const stmtGetMessages = db.prepare(`
+  SELECT * FROM (
+    SELECT id, username, text, image_url, created_at 
+    FROM messages 
+    WHERE room_id = ? 
+    ORDER BY created_at DESC, id DESC 
+    LIMIT 200
+  ) 
+  ORDER BY created_at ASC, id ASC
+`);
 const stmtInsertMessage = db.prepare('INSERT INTO messages (room_id, username, text, image_url, created_at) VALUES (?, ?, ?, ?, ?)');
 
 // Генератор приятных ID комнат

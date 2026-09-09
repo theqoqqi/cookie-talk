@@ -137,16 +137,16 @@
           <!-- Сообщения будут рендериться динамически -->
         </div>
 
-        <!-- Индикатор набора текста -->
-        <div id="typing-indicator" class="typing-indicator hidden">
-          <div class="typing-dots">
-            <span></span><span></span><span></span>
-          </div>
-          <span id="typing-text" class="typing-text">Собеседник печатает...</span>
-        </div>
-
         <!-- Панель ввода сообщения -->
         <footer class="chat-input-area">
+          <!-- Индикатор набора текста (абсолютно позиционирован над полем ввода) -->
+          <div id="typing-indicator" class="typing-indicator hidden">
+            <div class="typing-dots">
+              <span></span><span></span><span></span>
+            </div>
+            <span id="typing-text" class="typing-text">Собеседник печатает...</span>
+          </div>
+
           <!-- Превью выбранного изображения перед отправкой -->
           <div id="image-preview-bar" class="image-preview-bar hidden">
             <div class="image-preview-container">
