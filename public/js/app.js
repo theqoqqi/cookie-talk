@@ -12,7 +12,9 @@ const state = {
   isCreator: false,
   username: StorageManager.getUsername(),
   typingTimeout: null,
-  activeTypers: new Set()
+  activeTypers: new Set(),
+  lastMessageSender: null,
+  lastMessageTime: null
 };
 
 // Список милых псевдонимов для генератора
@@ -22,10 +24,10 @@ const FUN_NAMES = [
   'Воздушный Зефир', 'Имбирный Коржик', 'Кофейный Блинчик', 'Уютный Чайник'
 ];
 
-// Палитра цветов для аватаров
+// Палитра цветов для аватаров (сдержанная и современная)
 const AVATAR_COLORS = [
-  '#f59e0b', '#ec4899', '#8b5cf6', '#3b82f6', 
-  '#10b981', '#14b8a6', '#f97316', '#6366f1'
+  '#6366f1', '#ec4899', '#8b5cf6', '#3b82f6', 
+  '#10b981', '#14b8a6', '#0ea5e9', '#06b6d4'
 ];
 
 function getAvatarColor(name) {
@@ -354,6 +356,8 @@ socket.on('room-joined', (data) => {
 
   // Рендерим историю сообщений
   dom.messagesContainer.innerHTML = '';
+  state.lastMessageSender = null;
+  state.lastMessageTime = null;
   
   const createdDate = new Date(data.createdAt).toLocaleDateString();
   appendSystemMessage(`Комната создана: ${createdDate}`);
@@ -511,19 +515,29 @@ dom.confirmDeleteBtn.addEventListener('click', () => {
 // Рендеринг сообщения в DOM
 function appendMessage(msg) {
   const isSelf = msg.username === state.username;
+  const isSameSender = state.lastMessageSender === msg.username;
+  // Считаем сообщения подряд, если интервал между ними менее 4 минут
+  const isRecent = state.lastMessageTime && (msg.createdAt - state.lastMessageTime < 4 * 60 * 1000);
+  const isConsecutive = isSameSender && isRecent;
+
+  state.lastMessageSender = msg.username;
+  state.lastMessageTime = msg.createdAt;
+
   const avatarColor = getAvatarColor(msg.username);
   const initials = getInitials(msg.username);
 
   const row = document.createElement('div');
-  row.className = `message-row ${isSelf ? 'self' : ''}`;
+  row.className = `message-row ${isSelf ? 'self' : ''} ${isConsecutive ? 'consecutive' : ''}`;
 
   row.innerHTML = `
     <div class="message-avatar" style="background-color: ${avatarColor}">${initials}</div>
     <div class="message-content">
-      <div class="message-header">
-        <span class="message-sender">${isSelf ? 'Вы' : escapeHtml(msg.username)}</span>
-        <span class="message-time">${formatTime(msg.createdAt)}</span>
-      </div>
+      ${!isConsecutive ? `
+        <div class="message-header">
+          <span class="message-sender">${isSelf ? 'Вы' : escapeHtml(msg.username)}</span>
+          <span class="message-time">${formatTime(msg.createdAt)}</span>
+        </div>
+      ` : ''}
       <div class="message-bubble">${linkify(escapeHtml(msg.text))}</div>
     </div>
   `;
@@ -532,6 +546,8 @@ function appendMessage(msg) {
 }
 
 function appendSystemMessage(htmlText) {
+  state.lastMessageSender = null;
+  state.lastMessageTime = null;
   const div = document.createElement('div');
   div.className = 'system-message';
   div.innerHTML = htmlText;
