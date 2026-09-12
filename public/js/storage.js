@@ -46,8 +46,13 @@ const StorageManager = {
     return room ? room.creatorKey : null;
   },
 
+  getMemberKey(roomId) {
+    const room = this.getRoom(roomId);
+    return room ? room.memberKey : null;
+  },
+
   // Сохранить или обновить комнату
-  saveRoom({ id, name, isCreator = false, creatorKey = null }) {
+  saveRoom({ id, name, isCreator = false, creatorKey = null, memberKey = null }) {
     if (!id) return;
     const rooms = this.getRooms();
     const existingIndex = rooms.findIndex(r => r.id === id);
@@ -57,6 +62,7 @@ const StorageManager = {
       name: name || (existingIndex !== -1 ? rooms[existingIndex].name : id),
       isCreator: isCreator || (existingIndex !== -1 ? rooms[existingIndex].isCreator : false),
       creatorKey: creatorKey || (existingIndex !== -1 ? rooms[existingIndex].creatorKey : null),
+      memberKey: memberKey || (existingIndex !== -1 ? rooms[existingIndex].memberKey : null),
       lastVisited: Date.now()
     };
 

@@ -48,7 +48,26 @@ db.exec(`
     FOREIGN KEY(room_id) REFERENCES rooms(id) ON DELETE CASCADE
   );
 
-  CREATE INDEX IF NOT EXISTS idx_messages_room ON messages(room_id, created_at);
+  CREATE TABLE IF NOT EXISTS invites (
+    token TEXT PRIMARY KEY,
+    room_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    used_at INTEGER,
+    used_by_key TEXT,
+    FOREIGN KEY(room_id) REFERENCES rooms(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_invites_room ON invites(room_id);
+
+  CREATE TABLE IF NOT EXISTS members (
+    member_key TEXT PRIMARY KEY,
+    room_id TEXT NOT NULL,
+    username TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY(room_id) REFERENCES rooms(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_members_room ON members(room_id);
 `);
 
 // Миграция для существующих БД: добавляем колонку image_url при необходимости
@@ -64,6 +83,13 @@ const stmtGetRoomWithKey = db.prepare('SELECT * FROM rooms WHERE id = ?');
 const stmtCreateRoom = db.prepare('INSERT INTO rooms (id, name, creator_key, created_at) VALUES (?, ?, ?, ?)');
 const stmtDeleteRoom = db.prepare('DELETE FROM rooms WHERE id = ?');
 const stmtDeleteMessages = db.prepare('DELETE FROM messages WHERE room_id = ?');
+const stmtDeleteInvites = db.prepare('DELETE FROM invites WHERE room_id = ?');
+const stmtDeleteMembers = db.prepare('DELETE FROM members WHERE room_id = ?');
+const stmtCreateInvite = db.prepare('INSERT INTO invites (token, room_id, created_at, used_at, used_by_key) VALUES (?, ?, ?, NULL, NULL)');
+const stmtGetInvite = db.prepare('SELECT * FROM invites WHERE token = ? AND room_id = ?');
+const stmtMarkInviteUsed = db.prepare('UPDATE invites SET used_at = ?, used_by_key = ? WHERE token = ?');
+const stmtCreateMember = db.prepare('INSERT INTO members (member_key, room_id, username, created_at) VALUES (?, ?, ?, ?)');
+const stmtGetMember = db.prepare('SELECT * FROM members WHERE member_key = ? AND room_id = ?');
 const stmtGetMessages = db.prepare(`
   SELECT * FROM (
     SELECT id, username, text, image_url, created_at 
@@ -193,6 +219,51 @@ app.get('/api/rooms/:id', (req, res) => {
   }
 });
 
+// API: Создать одноразовую ссылку-приглашение
+app.post('/api/rooms/:roomId/invites', (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const { creatorKey, memberKey } = req.body || {};
+
+    const room = stmtGetRoom.get(roomId);
+    if (!room) {
+      return res.status(404).json({ success: false, error: 'Комната не найдена' });
+    }
+
+    // Проверяем права: либо создатель комнаты, либо подтвержденный участник
+    let isAuthorized = false;
+    if (creatorKey) {
+      const roomWithKey = stmtGetRoomWithKey.get(roomId);
+      if (roomWithKey && roomWithKey.creator_key === creatorKey) {
+        isAuthorized = true;
+      }
+    }
+    if (!isAuthorized && memberKey) {
+      const member = stmtGetMember.get(memberKey, roomId);
+      if (member) {
+        isAuthorized = true;
+      }
+    }
+
+    if (!isAuthorized) {
+      return res.status(403).json({ success: false, error: 'Недостаточно прав для создания приглашения' });
+    }
+
+    const token = crypto.randomBytes(16).toString('hex');
+    const createdAt = Date.now();
+    stmtCreateInvite.run(token, roomId, createdAt);
+
+    res.json({
+      success: true,
+      token,
+      inviteUrl: `/room/${roomId}?invite=${token}`
+    });
+  } catch (err) {
+    console.error('Ошибка создания инвайта:', err);
+    res.status(500).json({ success: false, error: 'Не удалось создать ссылку-приглашение' });
+  }
+});
+
 // Роутинг: вход в комнату по ссылке /room/:id перенаправляет на index.html
 app.get('/room/:id', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
@@ -219,7 +290,7 @@ function getRoomUsers(roomId) {
 // Socket.IO логика
 io.on('connection', (socket) => {
   // Подключение к комнате
-  socket.on('join-room', ({ roomId, username, creatorKey }) => {
+  socket.on('join-room', ({ roomId, username, creatorKey, memberKey, inviteToken }) => {
     try {
       if (!roomId || !username) {
         return socket.emit('room-error', { message: 'Укажите ID комнаты и имя пользователя' });
@@ -231,6 +302,32 @@ io.on('connection', (socket) => {
       }
 
       const isCreator = Boolean(creatorKey && creatorKey === room.creator_key);
+      let currentMemberKey = null;
+
+      if (isCreator) {
+        // Создатель комнаты имеет постоянный доступ
+      } else if (memberKey && stmtGetMember.get(memberKey, roomId)) {
+        // Подтвержденный участник, ранее активировавший одноразовую ссылку
+        currentMemberKey = memberKey;
+      } else if (inviteToken) {
+        // Проверяем одноразовую ссылку-приглашение
+        const invite = stmtGetInvite.get(inviteToken, roomId);
+        if (!invite) {
+          return socket.emit('room-error', { message: 'Недействительная ссылка-приглашение' });
+        }
+        if (invite.used_at) {
+          return socket.emit('room-error', { message: 'Эта ссылка-приглашение уже была использована' });
+        }
+
+        // Активируем ссылку и выдаем постоянный ключ участника для этого браузера
+        const now = Date.now();
+        currentMemberKey = crypto.randomBytes(24).toString('hex');
+        stmtMarkInviteUsed.run(now, currentMemberKey, inviteToken);
+        stmtCreateMember.run(currentMemberKey, roomId, username.trim().slice(0, 32), now);
+      } else {
+        // Нет прав доступа
+        return socket.emit('room-error', { message: 'Для входа в эту комнату требуется одноразовая ссылка-приглашение' });
+      }
 
       // Если сокет уже был в другой комнате, выходим
       if (socket.data.roomId && socket.data.roomId !== roomId) {
@@ -246,6 +343,7 @@ io.on('connection', (socket) => {
       socket.data.roomId = roomId;
       socket.data.username = username.trim().slice(0, 32);
       socket.data.isCreator = isCreator;
+      socket.data.memberKey = currentMemberKey;
 
       // Получаем историю сообщений
       const history = stmtGetMessages.all(roomId).map(msg => ({
@@ -258,12 +356,13 @@ io.on('connection', (socket) => {
 
       const currentUsers = getRoomUsers(roomId);
 
-      // Отправляем подключившемуся клиенту подтверждение с историей
+      // Отправляем подключившемуся клиенту подтверждение с историей и ключом участника
       socket.emit('room-joined', {
         roomId: room.id,
         name: room.name,
         createdAt: room.created_at,
         isCreator,
+        memberKey: currentMemberKey,
         users: currentUsers,
         history
       });
@@ -347,7 +446,9 @@ io.on('connection', (socket) => {
         return socket.emit('room-error', { message: 'Недостаточно прав: неверный ключ создателя' });
       }
 
-      // Удаляем сообщения и комнату
+      // Удаляем инвайты, участников, сообщения и комнату
+      stmtDeleteInvites.run(roomId);
+      stmtDeleteMembers.run(roomId);
       stmtDeleteMessages.run(roomId);
       stmtDeleteRoom.run(roomId);
 

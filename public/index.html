@@ -216,6 +216,21 @@
       </div>
     </div>
 
+    <!-- Модальное окно: подтверждение удаления комнаты из списка "Мои комнаты" -->
+    <div id="remove-saved-modal" class="modal-overlay hidden">
+      <div class="modal-card">
+        <div class="modal-icon">🗑️</div>
+        <h3 class="modal-title">Убрать из сохранённых?</h3>
+        <p class="modal-desc" id="remove-saved-desc">
+          Комната будет удалена из списка «Мои комнаты» в этом браузере. Вы сможете войти в неё снова по ссылке.
+        </p>
+        <div class="modal-actions">
+          <button type="button" id="cancel-remove-saved-btn" class="btn btn-secondary">Отмена</button>
+          <button type="button" id="confirm-remove-saved-btn" class="btn btn-danger">Убрать из списка</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Всплывающий Тост-уведомление -->
     <div id="toast" class="toast hidden">
       <span id="toast-icon">✨</span>

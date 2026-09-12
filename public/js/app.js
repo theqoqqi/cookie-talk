@@ -15,7 +15,9 @@ const state = {
   activeTypers: new Set(),
   lastMessageSender: null,
   lastMessageTime: null,
-  pendingImage: null
+  pendingImage: null,
+  pendingRemoveRoomId: null,
+  currentInviteToken: null
 };
 
 // Список милых псевдонимов для генератора
@@ -122,6 +124,10 @@ const dom = {
   deleteModal: document.getElementById('delete-modal'),
   cancelDeleteBtn: document.getElementById('cancel-delete-btn'),
   confirmDeleteBtn: document.getElementById('confirm-delete-btn'),
+  removeSavedModal: document.getElementById('remove-saved-modal'),
+  cancelRemoveSavedBtn: document.getElementById('cancel-remove-saved-btn'),
+  confirmRemoveSavedBtn: document.getElementById('confirm-remove-saved-btn'),
+  removeSavedDesc: document.getElementById('remove-saved-desc'),
   toast: document.getElementById('toast'),
   toastIcon: document.getElementById('toast-icon'),
   toastMessage: document.getElementById('toast-message')
@@ -171,6 +177,7 @@ function showView(viewName) {
     dom.homeView.classList.add('active');
     dom.chatView.classList.remove('active');
     document.body.classList.remove('chat-open');
+    document.documentElement.classList.remove('chat-open');
     state.currentRoomId = null;
     clearPendingImage();
     closeLightbox();
@@ -179,6 +186,7 @@ function showView(viewName) {
     dom.homeView.classList.remove('active');
     dom.chatView.classList.add('active');
     document.body.classList.add('chat-open');
+    document.documentElement.classList.add('chat-open');
     updateViewportHeight();
     setTimeout(scrollToBottom, 60);
   }
@@ -197,10 +205,10 @@ function renderSavedRooms() {
 
   dom.noSavedRooms.classList.add('hidden');
   dom.savedRoomsList.innerHTML = rooms.map(room => `
-    <div class="room-card-item" data-room-id="${room.id}">
+    <div class="room-card-item" data-room-id="${room.id}" title="Войти в «${escapeHtml(room.name)}»" tabindex="0" role="button">
       <div class="room-item-info">
         <div class="room-item-header">
-          <span class="room-item-name" title="${escapeHtml(room.name)}">${escapeHtml(room.name)}</span>
+          <span class="room-item-name">${escapeHtml(room.name)}</span>
           <span class="badge-role ${room.isCreator ? 'badge-creator' : 'badge-member'}">
             ${room.isCreator ? 'Создатель' : 'Участник'}
           </span>
@@ -208,35 +216,68 @@ function renderSavedRooms() {
         <div class="room-item-time">Визит: ${formatRelativeTime(room.lastVisited)} • <code>${escapeHtml(room.id)}</code></div>
       </div>
       <div class="room-item-actions">
-        <button class="btn btn-secondary btn-sm enter-saved-room-btn" data-room-id="${room.id}">
-          Войти
-        </button>
-        <button class="room-delete-local-btn" data-room-id="${room.id}" title="Убрать из сохраненных">
+        <button class="room-delete-local-btn" data-room-id="${room.id}" title="Убрать из сохраненных" aria-label="Убрать из сохраненных">
           ✕
         </button>
       </div>
     </div>
   `).join('');
 
-  // Обработчики кнопок входа в комнату
-  dom.savedRoomsList.querySelectorAll('.enter-saved-room-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const roomId = btn.getAttribute('data-room-id');
+  // Обработчики клика по карточке комнаты для входа
+  dom.savedRoomsList.querySelectorAll('.room-card-item').forEach(card => {
+    card.addEventListener('click', () => {
+      const roomId = card.getAttribute('data-room-id');
       navigateToRoom(roomId);
+    });
+
+    card.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        const roomId = card.getAttribute('data-room-id');
+        navigateToRoom(roomId);
+      }
     });
   });
 
-  // Обработчики удаления из локального списка
+  // Обработчики удаления из локального списка (с подтверждением в модальном окне)
   dom.savedRoomsList.querySelectorAll('.room-delete-local-btn').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       const roomId = btn.getAttribute('data-room-id');
-      StorageManager.removeRoom(roomId);
-      renderSavedRooms();
-      showToast('Комната убрана из вашего списка', '🗑️');
+      const room = StorageManager.getRoom(roomId);
+      state.pendingRemoveRoomId = roomId;
+      if (room) {
+        dom.removeSavedDesc.textContent = room.isCreator
+          ? `Комната «${room.name}» будет убрана из вашего списка в этом браузере. На сервере она сохранится.`
+          : `Комната «${room.name}» будет убрана из вашего списка сохранённых комнат.`;
+      }
+      dom.removeSavedModal.classList.remove('hidden');
     });
   });
 }
+
+// Управление модальным окном подтверждения удаления из "Мои комнаты"
+dom.cancelRemoveSavedBtn.addEventListener('click', () => {
+  dom.removeSavedModal.classList.add('hidden');
+  state.pendingRemoveRoomId = null;
+});
+
+dom.removeSavedModal.addEventListener('click', (e) => {
+  if (e.target === dom.removeSavedModal) {
+    dom.removeSavedModal.classList.add('hidden');
+    state.pendingRemoveRoomId = null;
+  }
+});
+
+dom.confirmRemoveSavedBtn.addEventListener('click', () => {
+  if (state.pendingRemoveRoomId) {
+    StorageManager.removeRoom(state.pendingRemoveRoomId);
+    renderSavedRooms();
+    showToast('Комната убрана из вашего списка', '🗑️');
+    state.pendingRemoveRoomId = null;
+  }
+  dom.removeSavedModal.classList.add('hidden');
+});
 
 // Создание новой комнаты
 dom.createRoomBtn.addEventListener('click', async () => {
@@ -286,9 +327,10 @@ dom.createRoomBtn.addEventListener('click', async () => {
 });
 
 // Навигация в комнату
-function navigateToRoom(roomId) {
-  window.history.pushState(null, '', `/room/${roomId}`);
-  joinRoom(roomId);
+function navigateToRoom(roomId, inviteToken = null) {
+  const url = inviteToken ? `/room/${roomId}?invite=${encodeURIComponent(inviteToken)}` : `/room/${roomId}`;
+  window.history.pushState(null, '', url);
+  joinRoom(roomId, inviteToken);
 }
 
 // Возврат на главную
@@ -307,8 +349,11 @@ window.addEventListener('popstate', () => {
 });
 
 // Подключение к комнате
-function joinRoom(roomId) {
+function joinRoom(roomId, inviteToken = null) {
   state.currentRoomId = roomId;
+  if (inviteToken) {
+    state.currentInviteToken = inviteToken;
+  }
 
   // Если имя не задано — запрашиваем модальным окном
   if (!state.username) {
@@ -319,6 +364,7 @@ function joinRoom(roomId) {
   }
 
   const creatorKey = StorageManager.getCreatorKey(roomId);
+  const memberKey = StorageManager.getMemberKey(roomId);
 
   // Очищаем предыдущие сообщения
   dom.messagesContainer.innerHTML = `
@@ -328,7 +374,9 @@ function joinRoom(roomId) {
   socket.emit('join-room', {
     roomId,
     username: state.username,
-    creatorKey
+    creatorKey,
+    memberKey,
+    inviteToken: state.currentInviteToken
   });
 }
 
@@ -344,7 +392,7 @@ dom.nameModalForm.addEventListener('submit', (e) => {
   dom.nameModal.classList.add('hidden');
 
   if (state.currentRoomId) {
-    joinRoom(state.currentRoomId);
+    joinRoom(state.currentRoomId, state.currentInviteToken);
   }
 });
 
@@ -353,14 +401,22 @@ socket.on('room-joined', (data) => {
   state.currentRoomId = data.roomId;
   state.currentRoomName = data.name;
   state.isCreator = data.isCreator;
+  state.currentInviteToken = null;
 
-  // Сохраняем комнату в localStorage
+  // Сохраняем комнату в localStorage (включая memberKey при наличии)
+  const savedMemberKey = data.memberKey || StorageManager.getMemberKey(data.roomId);
   StorageManager.saveRoom({
     id: data.roomId,
     name: data.name,
     isCreator: data.isCreator,
-    creatorKey: data.isCreator ? StorageManager.getCreatorKey(data.roomId) : null
+    creatorKey: data.isCreator ? StorageManager.getCreatorKey(data.roomId) : null,
+    memberKey: savedMemberKey
   });
+
+  // Очищаем токен инвайта из URL в адресной строке
+  if (window.location.search.includes('invite=')) {
+    window.history.replaceState(null, '', `/room/${data.roomId}`);
+  }
 
   // Обновляем заголовок и метаданные
   dom.currentRoomName.textContent = data.name;
@@ -466,6 +522,13 @@ socket.on('room-deleted', (data) => {
 // Socket.IO: Ошибка
 socket.on('room-error', (data) => {
   showToast(data.message || 'Произошла ошибка', '⚠️');
+  // Если ошибка доступа возникла при попытке входа в комнату, возвращаем на главную
+  if (!state.currentRoomName && window.location.pathname.startsWith('/room/')) {
+    setTimeout(() => {
+      window.history.pushState(null, '', '/');
+      showView('home');
+    }, 1800);
+  }
 });
 
 // Обработка и сжатие выбранного изображения через Canvas
@@ -565,8 +628,17 @@ function closeLightbox() {
 dom.lightboxCloseBtn.addEventListener('click', closeLightbox);
 dom.lightboxBackdrop.addEventListener('click', closeLightbox);
 window.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && !dom.lightboxModal.classList.contains('hidden')) {
-    closeLightbox();
+  if (e.key === 'Escape') {
+    if (!dom.lightboxModal.classList.contains('hidden')) {
+      closeLightbox();
+    }
+    if (!dom.removeSavedModal.classList.contains('hidden')) {
+      dom.removeSavedModal.classList.add('hidden');
+      state.pendingRemoveRoomId = null;
+    }
+    if (!dom.deleteModal.classList.contains('hidden')) {
+      dom.deleteModal.classList.add('hidden');
+    }
   }
 });
 
@@ -719,27 +791,45 @@ dom.messageInput.addEventListener('input', () => {
   }, 1500);
 });
 
-// Копирование ссылки на комнату
+// Копирование одноразовой ссылки на комнату
 dom.copyLinkBtn.addEventListener('click', async () => {
   if (!state.currentRoomId) return;
 
-  const url = `${window.location.origin}/room/${state.currentRoomId}`;
+  dom.copyLinkBtn.disabled = true;
   try {
+    const creatorKey = StorageManager.getCreatorKey(state.currentRoomId);
+    const memberKey = StorageManager.getMemberKey(state.currentRoomId);
+
+    const res = await fetch(`/api/rooms/${encodeURIComponent(state.currentRoomId)}/invites`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ creatorKey, memberKey })
+    });
+
+    const data = await res.json();
+    if (!data.success) {
+      showToast(data.error || 'Не удалось создать ссылку', '⚠️');
+      return;
+    }
+
+    const fullUrl = `${window.location.origin}${data.inviteUrl}`;
     if (navigator.clipboard && window.isSecureContext) {
-      await navigator.clipboard.writeText(url);
+      await navigator.clipboard.writeText(fullUrl);
     } else {
       // Fallback
       const textArea = document.createElement('textarea');
-      textArea.value = url;
+      textArea.value = fullUrl;
       document.body.appendChild(textArea);
       textArea.select();
       document.execCommand('copy');
       document.body.removeChild(textArea);
     }
-    showToast('Ссылка скопирована в буфер обмена!', '📋');
+    showToast('Одноразовая ссылка скопирована! 🔗', '✨');
   } catch (err) {
-    console.error('Ошибка копирования:', err);
-    prompt('Скопируйте ссылку вручную:', url);
+    console.error('Ошибка создания одноразовой ссылки:', err);
+    showToast('Ошибка при создании ссылки', '⚠️');
+  } finally {
+    dom.copyLinkBtn.disabled = false;
   }
 });
 
@@ -750,6 +840,12 @@ dom.deleteRoomBtn.addEventListener('click', () => {
 
 dom.cancelDeleteBtn.addEventListener('click', () => {
   dom.deleteModal.classList.add('hidden');
+});
+
+dom.deleteModal.addEventListener('click', (e) => {
+  if (e.target === dom.deleteModal) {
+    dom.deleteModal.classList.add('hidden');
+  }
 });
 
 dom.confirmDeleteBtn.addEventListener('click', () => {
@@ -888,6 +984,7 @@ function handleRoute() {
   const path = window.location.pathname;
   const searchParams = new URLSearchParams(window.location.search);
   const queryRoom = searchParams.get('room');
+  const inviteToken = searchParams.get('invite');
 
   let targetRoomId = null;
 
@@ -898,7 +995,7 @@ function handleRoute() {
   }
 
   if (targetRoomId) {
-    joinRoom(targetRoomId);
+    joinRoom(targetRoomId, inviteToken);
   } else {
     showView('home');
   }

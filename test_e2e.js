@@ -54,11 +54,56 @@ async function runTests() {
   client1.emit('join-room', { roomId, username: 'Пекарь-Создатель', creatorKey });
   await client1JoinPromise;
 
-  // Client 2 входит как гость (без creatorKey)
+  // 4. Попытка чужака войти в комнату без инвайта или ключей -> отказ
+  const strangerClient = io(`http://localhost:${PORT}`);
+  await new Promise((resolve) => strangerClient.on('connect', resolve));
+
+  const strangerErrorPromise = new Promise((resolve) => {
+    strangerClient.on('room-error', (data) => {
+      console.log('✔ 4. Чужак без ссылки-приглашения получил отказ доступа:', data.message);
+      resolve(data);
+    });
+  });
+  strangerClient.emit('join-room', { roomId, username: 'Чужак' });
+  await strangerErrorPromise;
+  strangerClient.disconnect();
+
+  // 5. Создатель генерирует одноразовую ссылку-приглашение через POST /api/rooms/:roomId/invites
+  const createInvite = (cKey) => new Promise((resolve, reject) => {
+    const postData = JSON.stringify({ creatorKey: cKey });
+    const req = http.request({
+      hostname: 'localhost',
+      port: PORT,
+      path: `/api/rooms/${roomId}/invites`,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(postData)
+      }
+    }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => resolve(JSON.parse(data)));
+    });
+    req.on('error', reject);
+    req.write(postData);
+    req.end();
+  });
+
+  const inviteData = await createInvite(creatorKey);
+  if (!inviteData.success || !inviteData.token) {
+    throw new Error('Не удалось создать инвайт: ' + JSON.stringify(inviteData));
+  }
+  const inviteToken = inviteData.token;
+  console.log('✔ 5. Создана одноразовая ссылка-приглашение:', inviteData.inviteUrl);
+
+  // 6. Client 2 входит как гость с одноразовым inviteToken
+  let client2MemberKey = null;
   const client2JoinPromise = new Promise((resolve) => {
     client2.on('room-joined', (data) => {
-      if (data.isCreator === false) {
-        console.log('✔ 4. Клиент 2 вошел как Участник (isCreator: false)');
+      if (data.isCreator === false && data.memberKey) {
+        client2MemberKey = data.memberKey;
+        console.log('✔ 6. Клиент 2 активировал ссылку, вошел как Участник и получил memberKey');
         resolve(data);
       }
     });
@@ -67,33 +112,61 @@ async function runTests() {
   const client1UserJoinedPromise = new Promise((resolve) => {
     client1.on('user-joined', (data) => {
       if (data.username === 'Гость-Собеседник') {
-        console.log('✔ 5. Создатель получил оповещение о входе собеседника');
+        console.log('✔ 7. Создатель получил оповещение о входе собеседника');
         resolve(data);
       }
     });
   });
 
-  client2.emit('join-room', { roomId, username: 'Гость-Собеседник' });
+  client2.emit('join-room', { roomId, username: 'Гость-Собеседник', inviteToken });
   await Promise.all([client2JoinPromise, client1UserJoinedPromise]);
 
-  // 6. Отправка сообщения от Клиента 2 Создателю
+  // 8. Попытка использовать тот же самый инвайт во второй раз -> отказ (ссылка одноразовая!)
+  const secondGuestClient = io(`http://localhost:${PORT}`);
+  await new Promise((resolve) => secondGuestClient.on('connect', resolve));
+
+  const alreadyUsedErrorPromise = new Promise((resolve) => {
+    secondGuestClient.on('room-error', (data) => {
+      console.log('✔ 8. Повторное использование ссылки-приглашения успешно отклонено сервером:', data.message);
+      resolve(data);
+    });
+  });
+  secondGuestClient.emit('join-room', { roomId, username: 'Второй-Гость', inviteToken });
+  await alreadyUsedErrorPromise;
+  secondGuestClient.disconnect();
+
+  // 9. Проверка повторного входа Клиента 2 с сохраненным memberKey (симуляция обновления страницы F5)
+  const client2Reloaded = io(`http://localhost:${PORT}`);
+  await new Promise((resolve) => client2Reloaded.on('connect', resolve));
+
+  const client2ReloadPromise = new Promise((resolve) => {
+    client2Reloaded.on('room-joined', (data) => {
+      console.log('✔ 9. Гость успешно переподключился по сохраненному memberKey (без необходимости инвайта)');
+      resolve(data);
+    });
+  });
+  client2Reloaded.emit('join-room', { roomId, username: 'Гость-Собеседник', memberKey: client2MemberKey });
+  await client2ReloadPromise;
+  client2Reloaded.disconnect();
+
+  // 10. Отправка сообщения от Клиента 2 Создателю
   const messagePromise = new Promise((resolve) => {
     client1.on('new-message', (msg) => {
-      if (msg.text === 'Привет! Я пришел по ссылке!') {
-        console.log('✔ 6. Создатель получил сообщение в реальном времени от Гостя');
+      if (msg.text === 'Привет! Я пришел по одноразовой ссылке!') {
+        console.log('✔ 10. Создатель получил сообщение в реальном времени от Гостя');
         resolve(msg);
       }
     });
   });
 
-  client2.emit('send-message', { text: 'Привет! Я пришел по ссылке!' });
+  client2.emit('send-message', { text: 'Привет! Я пришел по одноразовой ссылке!' });
   await messagePromise;
 
-  // 7. Проверка индикатора набора текста
+  // 11. Проверка индикатора набора текста
   const typingPromise = new Promise((resolve) => {
     client2.on('user-typing', (data) => {
       if (data.username === 'Пекарь-Создатель' && data.isTyping === true) {
-        console.log('✔ 7. Гость видит индикатор набора текста Создателя');
+        console.log('✔ 11. Гость видит индикатор набора текста Создателя');
         resolve(data);
       }
     });
@@ -158,7 +231,36 @@ async function runTests() {
   client2.emit('send-message', { text: '', imageUrl: uploadRes.url });
   await imageOnlyPromise;
 
-  // 11. Проверка получения истории с картинками новым участником (Client 3)
+  // 12. Client 2 (Гость) создает новую одноразовую ссылку-приглашение для Client 3 через memberKey
+  const createMemberInvite = (mKey) => new Promise((resolve, reject) => {
+    const postData = JSON.stringify({ memberKey: mKey });
+    const req = http.request({
+      hostname: 'localhost',
+      port: PORT,
+      path: `/api/rooms/${roomId}/invites`,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(postData)
+      }
+    }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => resolve(JSON.parse(data)));
+    });
+    req.on('error', reject);
+    req.write(postData);
+    req.end();
+  });
+
+  const memberInviteData = await createMemberInvite(client2MemberKey);
+  if (!memberInviteData.success || !memberInviteData.token) {
+    throw new Error('Не удалось создать инвайт участником: ' + JSON.stringify(memberInviteData));
+  }
+  const client3InviteToken = memberInviteData.token;
+  console.log('✔ 12. Гость успешно создал одноразовую ссылку по memberKey:', memberInviteData.inviteUrl);
+
+  // 13. Проверка получения истории с картинками новым участником (Client 3)
   const client3 = io(`http://localhost:${PORT}`);
   await new Promise((resolve) => client3.on('connect', resolve));
 
@@ -166,7 +268,7 @@ async function runTests() {
     client3.on('room-joined', (data) => {
       const imgMsgs = data.history.filter(m => m.imageUrl);
       if (imgMsgs.length >= 2) {
-        console.log('✔ 11. Новый участник успешно получил историю с сохраненными картинками (найдено:', imgMsgs.length, ')');
+        console.log('✔ 13. Новый участник вошел по ссылке от гостя и получил историю с картинками (найдено:', imgMsgs.length, ')');
         resolve(data);
       } else {
         reject(new Error('В истории не найдены сообщения с картинками'));
@@ -174,7 +276,7 @@ async function runTests() {
     });
   });
 
-  client3.emit('join-room', { roomId, username: 'Фото-Наблюдатель' });
+  client3.emit('join-room', { roomId, username: 'Фото-Наблюдатель', inviteToken: client3InviteToken });
   await client3HistoryPromise;
 
   // 12. Удаление комнаты Создателем
